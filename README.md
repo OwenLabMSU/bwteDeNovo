@@ -1,4 +1,3 @@
-"# bwteDiffExpr" 
 # Blue-winged Teal de novo transcriptome assembly
 
 This repository contains the shell scripts used to perform a blue-winged teal de novo transcriptome assembly. Manuscript Dolinski et al. in review with Data in Brief. 
