@@ -12,29 +12,24 @@
 #		/mnt/research/avian/teal/OUT/MyBusco
 #==================================================================================================
 
-MRT=/mnt/research/avian/teal
-SCR=/mnt/scratch/dolinsk5/avian/teal
-
-wget cegg.unige.ch/pub/SIBCOURSE/BUSCO-datasets.tar.gz
-
-cd $MRT/SHELL
+cd /mnt/home/homolaj1/Software/busco
 
 echo '#!/bin/sh 
-#SBATCH -t 24:00:00
+#SBATCH -t 2-0:00:00
 #SBATCH --mem=16G
 #SBATCH -J Busco
-#SBATCH -o /mnt/research/avian/teal/QSTAT/Busco.o
+#SBATCH -o /mnt/home/homolaj1/Software/busco/Busco.o
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=12
 
 module purge
-module load ifort/2017.1.132-GCC-6.3.0-2.27  impi/2017.1.132 GCC/7.3.0-2.30 OpenMPI/3.1.1 Python/3.6.6
-module load BUSCO/3.1.0-Python-2.7.13
+module load GCC/6.4.0-2.28  OpenMPI/2.1.2
+module load Python/3.6.4
+module load BLAST+/2.2.31
+module load HMMER/3.1b2
 
-cd '$MRT'/OUT
-
-python3 /opt/software/BUSCO/3.1.0-intel-2017a-Python-2.7.13/scripts/run_BUSCO.py -c 8 -i '$MRT'/OUT/Trinity/Trinity.fasta -l /mnt/research/avian/teal/MyBusco -o BUSCO_BWTE_April52019 -m trans
+python3 /mnt/home/homolaj1/Software/busco/scripts/run_BUSCO.py -c 12 -i /mnt/research/avian/teal/OUT/Trinity/Trinity.fasta --out BWTE_Oct2019 -m transcriptome --lineage_path /mnt/home/homolaj1/Software/busco/aves_odb9 -f
 
 scontrol show job ${SLURM_JOB_ID}' > busco.sh
 
