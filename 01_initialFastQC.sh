@@ -2,39 +2,35 @@
 #   File: 1_initialFastQC.sh
 #	Directory code:	/mnt/research/avian/teal/CODE
 #   Date: 03/26/19
-#   Description: Run FastQC to examine reads
-#	Run: Interactively - array
-#--------------------------------------------------------------------------------------------------
-#	Input files in directory:
-#		/mnt/scratch/dolinsk5/avian/teal/RAW
-#
-#	Output files to directories:
-#		/mnt/research/avian/teal/OUT/FastQC2/<ID>.html
+#   Description: Run FastQC to examine raw reads
 #==================================================================================================
 
 #Define alias for project root directory
 MRT=/mnt/research/avian/teal
-SCR=/mnt/scratch/dolinsk5/avian/teal
+SCR=/mnt/gs18/scratch/users/homolaj1/teal
 
 cd $MRT/SHELL
 
 echo '#!/bin/sh 
-#SBATCH -C intel16|intel18
-#SBATCH -N 1 -c 9
 #SBATCH -t 8:00:00
-#SBATCH --mem 16G 
-#SBATCH -J FastQC_array
-#SBATCH --mail-user dolinsk5@msu.edu
-#SBATCH -o '$MRT'/QSTAT/FastQC/FastQC_array.o
+#SBATCH --mem=32G
+#SBATCH -J initialFastQC
+#SBATCH -o /mnt/research/avian/teal/QSTAT/InitialFastQC.o
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=12
 
 module load FastQC/0.11.7-Java-1.8.0_162
 
-cd '$MRT'/RAW
+cd '$MRT'/RAW/PilotPool
 
-fastqc ./*.fastq.gz
+mkdir '$MRT'/OUT/FastQC/
+mkdir '$MRT'/OUT/FastQC/Initial
 
-scontrol show job ${SLURM_JOB_ID}' > fastqcraw.sh
+fastqc ./*.fastq.gz -o '$MRT'/OUT/FastQC/Initial
 
-sbatch fastqcraw.sh -t 0-92
+scontrol show job ${SLURM_JOB_ID}' > 01_initialFastQC.sh
+
+sbatch 01_initialFastQC.sh
  
 
