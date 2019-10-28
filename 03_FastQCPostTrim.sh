@@ -1,40 +1,30 @@
 #==================================================================================================
 #   File: 3_FastQCPostTrim.sh
-#	Directory code:	/mnt/research/avian/teal/CODE
-#   Date: 03/26/19
+#   Date: 10/28/19
 #   Description: Run FastQC to check that adapter sequences are gone
-#	Run: Interactively - array
-#--------------------------------------------------------------------------------------------------
-#	Input files in directory:
-#		/mnt/scratch/dolinsk5/avian/teal/RAW
-#
-#	Output files to directories:
-#		/mnt/research/avian/teal/OUT/FastQC2/<ID>.html
 #==================================================================================================
 
 #Define alias for project root directory
 MRT=/mnt/research/avian/teal
-SCR=/mnt/scratch/dolinsk5/avian/teal
+SCR=/mnt/gs18/scratch/users/homolaj1/teal
 
 cd $MRT/SHELL
 
 echo '#!/bin/sh 
-#SBATCH -C intel16|intel18
-#SBATCH -N 1 -c 9
-#SBATCH -t 8:00:00
-#SBATCH --mem 100G 
-#SBATCH -J FastQC_array
-#SBATCH -o '$MRT'/QSTAT/FastQCfilt/FastQC_array.o
+#SBATCH -t 1:00:00
+#SBATCH --mem=32G
+#SBATCH -J PostTrimFastQC
+#SBATCH -o /mnt/research/avian/teal/QSTAT/PostTrimFastQC.o
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=12
 
 module load FastQC/0.11.7-Java-1.8.0_162
 
-cd '$MRT'/OUT/rrnaFiltered
+cd '$SCR'/OUT/Trimmomatic/paired
 
-fastqc ./*.gz
+mkdir '$MRT'/OUT/FastQC/PostTrim
 
-mv ./*.zip '$MRT'/OUT/FastQCfilt/
-mv ./*.html '$MRT'/OUT/FastQCfilt/
+fastqc ./*.fastq.gz -o '$MRT'/OUT/FastQC/PostTrim' > FastQCPostTrim.sh
 
-scontrol show job ${SLURM_JOB_ID}' > fastqcfilt.sh
-
-sbatch fastqcfilt.sh -t 0-92
+sbatch FastQCPostTrim.sh
