@@ -1,7 +1,6 @@
 #==================================================================================================
-#   File: 1_initialFastQC.sh
-#	Directory code:	/mnt/research/avian/teal/CODE
-#   Date: 03/26/19
+#   File: 01_initialFastQC.sh
+#   Date: 10/27/19
 #   Description: Run FastQC to examine raw reads
 #==================================================================================================
 
@@ -12,7 +11,7 @@ SCR=/mnt/gs18/scratch/users/homolaj1/teal
 cd $MRT/SHELL
 
 echo '#!/bin/sh 
-#SBATCH -t 8:00:00
+#SBATCH -t 1:00:00
 #SBATCH --mem=32G
 #SBATCH -J initialFastQC
 #SBATCH -o /mnt/research/avian/teal/QSTAT/InitialFastQC.o
