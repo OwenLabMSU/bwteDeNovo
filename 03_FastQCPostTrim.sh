@@ -11,7 +11,7 @@ SCR=/mnt/gs18/scratch/users/homolaj1/teal
 cd $MRT/SHELL
 
 echo '#!/bin/sh 
-#SBATCH -t 1:00:00
+#SBATCH -t 3:00:00
 #SBATCH --mem=32G
 #SBATCH -J PostTrimFastQC
 #SBATCH -o /mnt/research/avian/teal/QSTAT/PostTrimFastQC.o

@@ -15,8 +15,8 @@
 cd /mnt/home/homolaj1/Software/busco
 
 echo '#!/bin/sh 
-#SBATCH -t 2-0:00:00
-#SBATCH --mem=16G
+#SBATCH -t 5-0:00:00
+#SBATCH --mem=64G
 #SBATCH -J Busco
 #SBATCH -o /mnt/home/homolaj1/Software/busco/Busco.o
 #SBATCH --nodes=1
