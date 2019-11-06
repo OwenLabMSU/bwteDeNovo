@@ -6,7 +6,6 @@
 
 #Define alias for project root directory
 MRT=/mnt/research/avian/teal
-SCR=/mnt/gs18/scratch/users/homolaj1/teal
 
 cd $MRT/SHELL
 
