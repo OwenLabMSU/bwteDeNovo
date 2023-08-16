@@ -1,0 +1,425 @@
+---
+title: "LPAIV-Infected and Controls by DPI - Ileum - Gene"
+author: "Amanda Dolinski & Jared J. Homola"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+\pagenumbering{gobble}
+
+This is an analysis of differential expression at the gene level between LPAIV-infected and uninfected control blue-winged teal ileum samples at each day post-infection (DPI). Differential expression was also analyzed between LPAIV-infected groups at different DPI.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.pos = 'H')
+```
+
+```{r message=FALSE, warning=FALSE}
+## Load packages and data
+library(limma)
+library(edgeR)
+library(Glimma)
+library(gplots)
+library(ggrepel)
+library(RColorBrewer)
+library(gridExtra)
+library(kableExtra)
+library(topGO)
+library(clusterProfiler)
+library(tidyverse)
+
+## Load data
+annot <- read.delim("G:/Shared drives/RNA Seq Supershedder Project/BWTE DE manuscript/extData/Trinotate.csv", header = TRUE, sep = "\t")
+cnt <- read.table("G:/Shared drives/RNA Seq Supershedder Project/BWTE DE manuscript/extData/rsem.gene.counts.matrix", header = TRUE)
+covars <- read.csv("G:/Shared drives/RNA Seq Supershedder Project/BWTE DE manuscript/extData/BWTE54_SSgroup_Raw_Pool.csv", header = TRUE)
+```
+
+```{r, warning = FALSE, message = FALSE}
+cnt <- cnt %>%
+  select(
+    -alignEstimateAbundance_BWTE_Ileum_36_S50,
+    -alignEstimateAbundance_BWTE_Bursa_36_S31,-alignEstimateAbundance_BWTE_Ileum_19_S35,
+    -alignEstimateAbundance_BWTE_Bursa_19_S14) %>%
+  rownames_to_column("gene") %>%
+  separate(gene, into = c(NA, "pt1", "pt2", "gene")) %>%
+  unite(gene, pt1, pt2, gene) %>%
+  column_to_rownames("gene") %>% 
+  select(contains("Ileum"))
+
+covars <- covars %>%
+  filter(!bird %in% c("36", "19")) %>%
+  arrange(bird) %>%
+  mutate(group = str_remove(group, "-"))
+
+annot <- annot %>%
+  separate(transcript_id, into = c(NA, "pt1", "pt2", "gene", "isoform")) %>%
+  unite(transcript_id, pt1, pt2, gene, isoform) %>% 
+  separate(gene_id, into = c(NA, "pt1", "pt2", "gene")) %>%
+  unite(gene_id, pt1, pt2, gene)
+
+```
+
+```{r, warning = FALSE, message = FALSE}
+bird <- as.factor(covars$bird)
+sex <- as.factor(covars$sex)
+age <- as.numeric(covars$age)
+weight <- covars$wt_55
+group <- recode(covars$group, C1 = "Ctl", C14 = "Ctl") %>% 
+  as.factor()
+pool <- as.factor(covars$Pool.Ileum)
+```
+
+```{r, warning = FALSE, message = FALSE, results = 'hide'}
+#Convert to DGEList object
+dge <- DGEList(counts=cnt)
+dge$genes <- annot[match(rownames(dge$counts), annot$gene_id),]
+
+#CPM and log-CPM
+cpm <- cpm(dge)
+lcpm <- cpm(dge, log = TRUE)
+
+#### Retain only genes expressed at >0.5 CPM in at least 25% of individuals
+table(rowSums(dge$counts==0) == length(cnt[1,]))
+keep.exprs <- rowSums(cpm>0.5) >= length(cnt[1,])/4
+sum(keep.exprs)
+
+dge <- dge[keep.exprs,, keep.lib.sizes=FALSE]
+table(rowSums(dge$counts==0) == length(cnt[1,]))
+dim(dge)
+
+#TMM normalization
+dge <- calcNormFactors(dge, method = "TMM")
+```
+
+\newpage  
+
+# Differential expression analysis
+```{r}
+## Establish design matrix
+design = model.matrix(~ 0 +
+                        group +
+                        age +
+                        sex + 
+                        weight + 
+                        pool)
+
+colnames(design) <- gsub("group", "", colnames(design))
+
+contr.matrix = makeContrasts(
+  CtlvI1 = Ctl - I1,
+  CtlvI3 = Ctl - I3,
+  CtlvI5 = Ctl - I5,
+  CtlvI14 = Ctl - I14,
+  I1vI3 = I1 - I3,
+  I3vI5 = I3 - I5,
+  I5vI14 = I5 - I14,
+  levels = colnames(design))
+
+v <- voomWithQualityWeights(dge, design, plot = FALSE)
+
+vfit <- lmFit(v, design) 
+vfit <- contrasts.fit(vfit, contrasts = contr.matrix)
+tfit <- treat(vfit, lfc = 1.0)
+```
+
+```{r}
+dt <- decideTests(tfit, p.value = 0.1, adjust.method = "fdr")
+summary(dt) %>% 
+  kbl(booktabs = T, caption = "Count of DE genes. For a gene to be considered differentially expressed, we require a p-value of 0.1 with a false discovery rate correction and a log fold change difference of 1.0.") %>% 
+  kable_styling(position ="center", latex_options = c("hold_position"))
+
+dt.tib <- as_tibble(dt, rownames = NA) %>% 
+  rownames_to_column("gene") %>% 
+  mutate_at(vars(starts_with("C")), as.numeric) %>% 
+  mutate_at(vars(starts_with("I")), as.numeric) %>% 
+  filter_at(vars(CtlvI1:I5vI14), any_vars(. != 0))
+```
+
+\newpage  
+
+### Volcano plot  
+Volcano plot reporting -log10(p-values) as a function of log2(fold change) between the samples (logFC, x axis). Genes that are identified as significantly differentially expressed following a false discovery rate correction (q = 0.10) are shown in red 
+```{r, warning = FALSE, message = FALSE, fig.height = 8, fig.width = 7, fig.align = "center"}
+tmp1 <- topTreat(tfit, coef = 1, n = Inf)
+results1 <- mutate(tmp1, sig=ifelse(tmp1$adj.P.Val<0.1, "Sig", "Not Sig"))
+p1 <- ggplot(results1, aes(logFC, -log10(P.Value))) +
+  geom_point(aes(col = sig)) +
+  scale_color_manual(values=c("black", "red")) +
+  ggtitle("Control vs. Infected, Day 1") +
+  ylab("-Log10(Adjusted p-value)") +
+  xlab("Log(Fold count)") +
+  theme_bw() +
+  theme(legend.position = "none",
+        plot.title = element_text(size = 9))
+
+tmp2 <- topTreat(tfit, coef = 2, n = Inf)
+results2 <- mutate(tmp2, sig=ifelse(tmp2$adj.P.Val<0.1, "Sig", "Not Sig"))
+p2 <- ggplot(results2, aes(logFC, -log10(P.Value))) +
+  geom_point(aes(col = sig)) +
+  scale_color_manual(values=c("black", "red")) +
+  ggtitle("Control vs. Infected, Day 3") +
+  ylab("-Log10(Adjusted p-value)") +
+  xlab("Log(Fold count)") +
+  theme_bw() +
+  theme(legend.position = "none",
+        plot.title = element_text(size = 9))
+
+tmp3 <- topTreat(tfit, coef = 3, n = Inf)
+results3 <- mutate(tmp3, sig=ifelse(tmp3$adj.P.Val<0.1, "Sig", "Not Sig"))
+p3 <- ggplot(results3, aes(logFC, -log10(P.Value))) +
+  geom_point(aes(col = sig)) +
+  scale_color_manual(values=c("black", "red")) +
+  ggtitle("Control vs. Infected, Day 5") +
+  ylab("-Log10(Adjusted p-value)") +
+  xlab("Log(Fold count)") +
+  theme_bw() +
+  theme(legend.position = "none",
+        plot.title = element_text(size = 9))
+
+tmp4 <- topTreat(tfit, coef = 4, n = Inf)
+results4 <- mutate(tmp4, sig=ifelse(tmp4$adj.P.Val<0.1, "Sig", "Not Sig"))
+p4 <- ggplot(results4, aes(logFC, -log10(P.Value))) +
+  geom_point(aes(col = sig)) +
+  scale_color_manual(values=c("black", "red")) +
+  ggtitle("Control vs. Infected, Day 14") +
+  ylab("-Log10(Adjusted p-value)") +
+  xlab("Log(Fold count)") +
+  theme_bw() +
+  theme(legend.position = "none",
+        plot.title = element_text(size = 9))
+
+tmp5 <- topTreat(tfit, coef = 5, n = Inf)
+results5 <- mutate(tmp5, sig=ifelse(tmp5$adj.P.Val<0.1, "Sig", "Not Sig"))
+p5 <- ggplot(results5, aes(logFC, -log10(P.Value))) +
+  geom_point(aes(col = sig)) +
+  scale_color_manual(values=c("black", "red")) +
+  ggtitle("Infected, Day 1 vs. Infected, Day 3") +
+  ylab("-Log10(Adjusted p-value)") +
+  xlab("Log(Fold count)") +
+  theme_bw() +
+  theme(legend.position = "none",
+        plot.title = element_text(size = 9))
+
+tmp6 <- topTreat(tfit, coef = 6, n = Inf)
+results6 <- mutate(tmp6, sig=ifelse(tmp6$adj.P.Val<0.1, "Sig", "Not Sig"))
+p6 <- ggplot(results6, aes(logFC, -log10(P.Value))) +
+  geom_point(aes(col = sig)) +
+  scale_color_manual(values=c("black", "red")) +
+  ggtitle("Infected, Day 3 vs. Infected, Day 5") +
+  ylab("-Log10(Adjusted p-value)") +
+  xlab("Log(Fold count)") +
+  theme_bw() +
+  theme(legend.position = "none",
+        plot.title = element_text(size = 9))
+
+
+tmp7 <- topTreat(tfit, coef = 7, n = Inf)
+results7 <- mutate(tmp7, sig=ifelse(tmp7$adj.P.Val<0.1, "Sig", "Not Sig"))
+p7 <- ggplot(results7, aes(logFC, -log10(P.Value))) +
+  geom_point(aes(col = sig)) +
+  scale_color_manual(values=c("black", "red")) +
+  ggtitle("Infected, Day 5 vs. Infected, Day 14") +
+  ylab("-Log10(Adjusted p-value)") +
+  xlab("Log(Fold count)") +
+  theme_bw() +
+  theme(legend.position = "none",
+        plot.title = element_text(size = 9))
+
+grid.arrange(p1, p2, p3, p4, p5, p6, p7, nrow = 3)
+```
+
+
+```{r, eval = FALSE, warning = FALSE, message = FALSE, fig.height = 18, fig.width = 9, fig.align = "center"}
+# Get the gene names for DE genes
+deGeneCounts <- lcpm %>%
+  as_tibble(rownames = NA) %>%
+  rownames_to_column("gene") %>%
+  filter(gene %in% dt.tib$gene) %>%
+  column_to_rownames("gene")
+
+group2 <- group %>% 
+  as_tibble() %>% 
+  mutate(group = sub("I3", "I03", value)) %>% 
+  mutate(group = sub("I1", "I01", group)) %>% 
+  mutate(group = sub("I5", "I05", group)) %>% 
+  mutate(group = sub("I014", "I14", group))
+
+newNames1 <- colnames(deGeneCounts) %>%
+  as_tibble() %>%
+  separate(value, into = c(NA, NA, NA, "sample", NA)) %>%
+  mutate(group = group2$group) %>%
+  unite("sample", 2:1, sep = "_")
+
+colnames(deGeneCounts) <- newNames1$sample
+deGeneCounts <- deGeneCounts %>% dplyr::select(order(colnames(.))) %>%
+  as.matrix()
+
+
+heatmap.annot <- annot %>%
+  select(
+    gene_id,
+    sprot_Top_BLASTX_hit) %>% 
+  filter(gene_id %in% dt.tib$gene) %>% 
+  separate(sprot_Top_BLASTX_hit, into = c("SwissProt_GeneName", NA, NA, NA, NA, "sprot2", NA), "\\^") %>% 
+  separate(sprot2, sep = "=", into = c(NA, "SwissProt_GeneFunction")) %>% 
+  distinct(gene_id, SwissProt_GeneName) %>% 
+  filter(SwissProt_GeneName != ".")
+
+deGeneCounts <- deGeneCounts %>% 
+  as_tibble(rownames = NA) %>% 
+  mutate(gene = rownames(.)) %>% 
+  rename(gene_id = gene) %>% 
+  left_join(heatmap.annot) %>% 
+  mutate(SwissProt_GeneName = replace_na(SwissProt_GeneName, ".")) %>% 
+  unite(gene, gene_id:SwissProt_GeneName, sep = " - ") %>% 
+  column_to_rownames("gene") %>% 
+  as.matrix()
+
+## Set up palette
+mypalette <- brewer.pal(11,"RdYlBu")
+morecols <- colorRampPalette(mypalette)
+
+hc <- hclust(as.dist(1-cor(t(deGeneCounts))))
+
+# Plot the heatmap
+heatmap.2(deGeneCounts,
+          Colv = FALSE,
+          Rowv = as.dendrogram(hc),
+          col = rev(morecols(50)),
+          trace = "none",
+          colsep = c(9, 21, 33, 45),
+          dendrogram = "row",
+          density.info = "none",
+          key = TRUE,
+          #main = "Ileum - Gene level",
+          #margins = c(2, 2),
+          scale ="row",
+          lwid=c(2.5,4), 
+          lhei=c(0.1,4))
+```
+
+```{r message=FALSE, warning=FALSE}
+tmp1a <- tmp1 %>% select(gene_id, adj.P.Val, logFC, sprot_Top_BLASTX_hit, Kegg) %>% separate(sprot_Top_BLASTX_hit, into = c("SwissProt_GeneName", NA, NA, NA, NA, "sprot2", NA), "\\^") %>%   separate(sprot2, sep = "=", into = c(NA, "SwissProt_GeneFunction")) %>%  separate(Kegg, into = c("KEGG_ID", "KO_ID"), sep = "\\`") %>%  mutate(comp = "CtlvI1")
+tmp2a <- tmp2 %>% select(gene_id, adj.P.Val, logFC, sprot_Top_BLASTX_hit, Kegg) %>% separate(sprot_Top_BLASTX_hit, into = c("SwissProt_GeneName", NA, NA, NA, NA, "sprot2", NA), "\\^") %>%   separate(sprot2, sep = "=", into = c(NA, "SwissProt_GeneFunction")) %>%  separate(Kegg, into = c("KEGG_ID", "KO_ID"), sep = "\\`") %>% mutate(comp = "CtlvI3")
+tmp3a <- tmp3 %>% select(gene_id, adj.P.Val, logFC, sprot_Top_BLASTX_hit, Kegg) %>% separate(sprot_Top_BLASTX_hit, into = c("SwissProt_GeneName", NA, NA, NA, NA, "sprot2", NA), "\\^") %>%   separate(sprot2, sep = "=", into = c(NA, "SwissProt_GeneFunction")) %>%  separate(Kegg, into = c("KEGG_ID", "KO_ID"), sep = "\\`") %>% mutate(comp = "CtlvI5")
+tmp4a <- tmp4 %>% select(gene_id, adj.P.Val, logFC, sprot_Top_BLASTX_hit, Kegg) %>% separate(sprot_Top_BLASTX_hit, into = c("SwissProt_GeneName", NA, NA, NA, NA, "sprot2", NA), "\\^") %>%   separate(sprot2, sep = "=", into = c(NA, "SwissProt_GeneFunction")) %>%  separate(Kegg, into = c("KEGG_ID", "KO_ID"), sep = "\\`") %>% mutate(comp = "CtlvI14")
+tmp5a <- tmp5 %>% select(gene_id, adj.P.Val, logFC, sprot_Top_BLASTX_hit, Kegg) %>% separate(sprot_Top_BLASTX_hit, into = c("SwissProt_GeneName", NA, NA, NA, NA, "sprot2", NA), "\\^") %>%   separate(sprot2, sep = "=", into = c(NA, "SwissProt_GeneFunction")) %>%  separate(Kegg, into = c("KEGG_ID", "KO_ID"), sep = "\\`") %>% mutate(comp = "I1vI3")
+tmp6a <- tmp6 %>% select(gene_id, adj.P.Val, logFC, sprot_Top_BLASTX_hit, Kegg) %>% separate(sprot_Top_BLASTX_hit, into = c("SwissProt_GeneName", NA, NA, NA, NA, "sprot2", NA), "\\^") %>%   separate(sprot2, sep = "=", into = c(NA, "SwissProt_GeneFunction")) %>%  separate(Kegg, into = c("KEGG_ID", "KO_ID"), sep = "\\`") %>% mutate(comp = "I3vI5")
+tmp7a <- tmp7 %>% select(gene_id, adj.P.Val, logFC, sprot_Top_BLASTX_hit, Kegg) %>% separate(sprot_Top_BLASTX_hit, into = c("SwissProt_GeneName", NA, NA, NA, NA, "sprot2", NA), "\\^") %>%   separate(sprot2, sep = "=", into = c(NA, "SwissProt_GeneFunction")) %>%  separate(Kegg, into = c("KEGG_ID", "KO_ID"), sep = "\\`") %>% mutate(comp = "I5vI14")
+
+bind_rows(tmp1a, tmp2a, tmp3a, tmp4a, tmp5a, tmp6a, tmp7a) %>% 
+  select(-SwissProt_GeneFunction, -KEGG_ID, -KO_ID) %>% 
+  filter(gene_id %in% dt.tib$gene) %>% 
+  mutate(logFoldCount = ifelse(adj.P.Val < 0.10, round(logFC, 2), "ns")) %>% 
+  select(-adj.P.Val, -logFC) %>% 
+  pivot_wider(names_from = comp, values_from = logFoldCount) %>% 
+  kbl(booktabs = T, 
+      longtable =T,
+      caption ="Annotations for differentially expressed genes. ns denotes non-significant genes for each comparison and numerical values are the log(fold change) difference") %>%
+  kable_styling(latex_options = c("repeat_header"))
+```
+
+```{r message=FALSE, warning=FALSE}
+bind_rows(tmp1a, tmp2a, tmp3a, tmp4a, tmp5a, tmp6a, tmp7a) %>% 
+  select(-comp, -adj.P.Val, -logFC) %>% 
+  filter(gene_id %in% dt.tib$gene) %>% 
+  distinct(.) %>% 
+  select(-gene_id) %>% 
+  filter(SwissProt_GeneName != ".") %>% 
+  kbl(booktabs = TRUE, 
+      longtable =T,
+      caption = "Gene functions") %>%
+  kable_styling(latex_options = c("repeat_header")) %>% 
+  landscape() %>% 
+  column_spec(2, width ="10em") %>% 
+  column_spec(3, width ="15em")
+  #kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+```{r message=FALSE, warning=FALSE}
+topGO.mappings <- readMappings("G:/Shared drives/RNA Seq Supershedder Project/BWTE DE manuscript/extData/GOdbGene.txt", sep = "\t", IDsep = ",")
+
+goEnrich <- function(targetComp, ...) {
+  DE.results <- dt.tib %>% filter(!!sym(targetComp) != 0)
+  
+  all.genes <- sort(unique(as.character(rownames(tfit$p.value))))
+  int.genes <- DE.results$gene
+  int.genes <- factor(as.integer(all.genes %in% int.genes))
+  names(int.genes) = all.genes
+  
+  go.obj.BP <- new("topGOdata", ontology='BP',
+              allGenes = int.genes,
+              annot = annFUN.gene2GO,
+              nodeSize = 5,
+              gene2GO = topGO.mappings)
+
+  go.obj.MF <- new("topGOdata", ontology='MF',
+                 allGenes = int.genes,
+                 annot = annFUN.gene2GO,
+                 nodeSize = 5,
+                 gene2GO = topGO.mappings)
+
+  go.obj.CC <- new("topGOdata", ontology='CC',
+                 allGenes = int.genes,
+                 annot = annFUN.gene2GO,
+                 nodeSize = 5,
+                 gene2GO = topGO.mappings)
+  
+  results.BP <- runTest(go.obj.BP, algorithm = "elim", statistic = "fisher")
+
+  results.tab.BP <- GenTable(object = go.obj.BP, 
+                          elimFisher = results.BP, 
+                          topNodes = 50) %>% 
+    as_tibble() %>% 
+    mutate(pVal = as.numeric(elimFisher)) %>% 
+    filter(pVal < 0.01) %>% 
+    mutate(Domain = "BP") %>% 
+    mutate(Comparison = targetComp)
+  
+  results.MF <- runTest(go.obj.MF, algorithm = "elim", statistic = "fisher")
+  
+  results.tab.MF <- GenTable(object = go.obj.MF, 
+                          elimFisher = results.MF, 
+                          topNodes = 50) %>% 
+    as_tibble() %>% 
+    mutate(pVal = as.numeric(elimFisher)) %>% 
+    filter(pVal < 0.01) %>% 
+    mutate(Domain = "MF") %>% 
+    mutate(Comparison = targetComp)
+  
+  results.CC <- runTest(go.obj.CC, algorithm = "elim", statistic = "fisher")
+  
+  results.tab.CC <- GenTable(object = go.obj.CC, 
+                          elimFisher = results.CC, 
+                          topNodes = 50) %>% 
+    as_tibble() %>% 
+    mutate(pVal = as.numeric(elimFisher)) %>% 
+    filter(pVal < 0.01) %>% 
+    mutate(Domain = "CC") %>% 
+    mutate(Comparison = targetComp)
+  
+  rbind(results.tab.BP,
+    results.tab.MF,
+    results.tab.CC)
+}
+
+results <- list()
+
+for(z in unique(names(dt.tib)[-1])) {
+  if (dt.tib %>% 
+      filter(!!sym(z) != 0) %>% 
+      nrow(.) > 0)
+  results[[length(results)+1]] <- goEnrich(z)
+}
+
+bind_rows(results, .id = "column_label") %>%
+  select(-column_label) %>% 
+  arrange(GO.ID, Comparison) %>% 
+  kbl(booktabs = T, 
+      longtable = T,
+      caption = "Gene Ontology enrichemnt analysis: GO terms with p-values <0.05 were determined as over-represented (enriched)") %>%
+  kable_styling(latex_options = c("repeat_header")) %>% 
+  landscape() 
+```
